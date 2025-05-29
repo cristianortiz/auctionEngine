@@ -1,7 +1,3 @@
-Okay, here is the entire project plan translated into English and formatted in Markdown, suitable for a `README.md` file.
-
----
-
 # Online Vehicle Auction Platform
 
 This project aims to build a web platform for auctioning used and damaged vehicles, with an initial focus on vehicles sourced from insurance companies.
