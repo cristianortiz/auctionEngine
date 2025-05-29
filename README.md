@@ -1,6 +1,6 @@
-# Online Vehicle Auction Platform
+# Online Auction Platform
 
-This project aims to build a web platform for auctioning used and damaged vehicles, with an initial focus on vehicles sourced from insurance companies.
+This project aims to build a web platform for auctioning products like used and damaged vehicles
 
 ## Description
 
