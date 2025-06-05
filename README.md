@@ -21,12 +21,16 @@ This approach facilitates understanding and maintenance, and paves the way for a
 *   **Repository Pattern:** Abstracts persistent data access. Domain and application layers interact with repository *interfaces*, whose concrete implementations (e.g., for PostgreSQL) live in the infrastructure layer.
 *   **Bounded Contexts:** Each module defines a clear boundary where domain terms and concepts have a specific and consistent meaning.
 
+
+
 ## Technologies
 
 *   **Backend:** Go (API, business logic, WebSocket server)
 *   **Frontend:** React (User interface, consume API and WebSocket)
 *   **Database:** PostgreSQL (Relational, for structured and transactional data)
 *   **Real-time Communication:** WebSockets (for the online auction between Backend and Frontend)
+    *   **WebSockets Explained:** A communication protocol providing full-duplex, persistent connections over a single TCP connection. Unlike traditional HTTP, both client and server can send data at any time.
+    *   **Application in AuctionEngine:** Essential for real-time features. Used to instantly push auction state updates (price, time, bids) from the server to all connected clients, synchronize the auction timer, and handle real-time bid communication. This ensures all users see the most current information without constant polling.
 *   *(Optional/Future):* gRPC (Consider for internal service communication if the monolith is broken down).
 
 ## Directory Structure (Modular Monolith in Go)

@@ -45,12 +45,12 @@ func (s *Server) Start(addr string) error {
 		signal.Notify(quit, os.Interrupt)
 		<-quit
 
-		logger.GetLogger().Info("Shutting down HTTP server...")
+		log.Info("Shutting down HTTP server...")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.app.ShutdownWithContext(ctx)
 	}()
 
-	logger.GetLogger().Info("HTTP server started", zap.String("addr", addr))
+	log.Info("HTTP server started", zap.String("addr", addr))
 	return s.app.Listen(addr)
 }
