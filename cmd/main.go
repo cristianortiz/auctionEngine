@@ -8,6 +8,7 @@ import (
 	"github.com/cristianortiz/auctionEngine/internal/shared/db/migrations"
 	"github.com/cristianortiz/auctionEngine/internal/shared/httpserver"
 	"github.com/cristianortiz/auctionEngine/internal/shared/logger"
+	"github.com/cristianortiz/auctionEngine/internal/shared/websocket"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
@@ -29,7 +30,12 @@ func main() {
 	conn := db.GetPostgresDB()
 	defer conn.Close(context.Background())
 
-	server := httpserver.NewServer()
+	//init webSocket hub and runs it in a goroutine
+	hub := websocket.NewHub()
+	go hub.Run()
+	logger.Info("WebSocket Hub started.")
+
+	server := httpserver.NewServer(":"+port, hub)
 	if err := server.Start(":" + port); err != nil {
 		logger.Fatal("HTTP server failed", zap.Error(err))
 	}

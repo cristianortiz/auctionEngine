@@ -26,13 +26,13 @@ type Hub struct {
 
 // Client representa una conexión WebSocket individual.
 type Client struct {
-	hub *Hub
+	Hub *Hub
 	// The websocket connection.
-	conn *websocket.Conn
+	Conn *websocket.Conn
 	// Buffered channel of outbound messages.
-	send chan []byte
+	Send chan []byte
 	// The lot ID this client is connected to.
-	lotID string
+	LotID string
 }
 
 // Message representa un mensaje para ser transmitido.
@@ -57,40 +57,40 @@ func (h *Hub) Run() {
 		select {
 		case client := <-h.register:
 			// Registra el cliente en el grupo del lotID
-			if _, ok := h.clients[client.lotID]; !ok {
-				h.clients[client.lotID] = make(map[*Client]bool)
+			if _, ok := h.clients[client.LotID]; !ok {
+				h.clients[client.LotID] = make(map[*Client]bool)
 			}
-			h.clients[client.lotID][client] = true
-			log.Info("Client registered", zap.String("lotID", client.lotID), zap.String("remote_addr", client.conn.RemoteAddr().String()))
+			h.clients[client.LotID][client] = true
+			log.Info("Client registered", zap.String("LotID", client.LotID), zap.String("remote_addr", client.Conn.RemoteAddr().String()))
 
 		case client := <-h.unregister:
-			// Elimina el cliente del grupo del lotID
-			if clients, ok := h.clients[client.lotID]; ok {
+			// Elimina el cliente del grupo del LotID
+			if clients, ok := h.clients[client.LotID]; ok {
 				if _, ok := clients[client]; ok {
 					delete(clients, client)
-					close(client.send)
-					log.Info("Client unregistered", zap.String("lotID", client.lotID), zap.String("remote_addr", client.conn.RemoteAddr().String()))
+					close(client.Send)
+					log.Info("Client unregistered", zap.String("LotID", client.LotID), zap.String("remote_addr", client.Conn.RemoteAddr().String()))
 					// Si no quedan clientes en este grupo, elimina el mapa
 					if len(clients) == 0 {
-						delete(h.clients, client.lotID)
-						log.Info("Lot group removed as empty", zap.String("lotID", client.lotID))
+						delete(h.clients, client.LotID)
+						log.Info("Lot group removed as empty", zap.String("LotID", client.LotID))
 					}
 				}
 			}
 
 		case message := <-h.broadcast:
-			// Transmite el mensaje a todos los clientes en el grupo del lotID
+			// Transmite el mensaje a todos los clientes en el grupo del LotID
 			if clients, ok := h.clients[message.LotID]; ok {
-				log.Debug("Broadcasting message to lot", zap.String("lotID", message.LotID), zap.Int("clients", len(clients)))
+				log.Debug("Broadcasting message to lot", zap.String("LotID", message.LotID), zap.Int("clients", len(clients)))
 				for client := range clients {
 					select {
-					case client.send <- message.Data:
+					case client.Send <- message.Data:
 						// Mensaje enviado
 					default:
 						// No se pudo enviar, cliente probablemente desconectado
-						close(client.send)
+						close(client.Send)
 						delete(clients, client)
-						log.Warn("Failed to send message to client, unregistering", zap.String("lotID", client.lotID), zap.String("remote_addr", client.conn.RemoteAddr().String()))
+						log.Warn("Failed to Send message to client, unregistering", zap.String("lotID", client.LotID), zap.String("remote_addr", client.Conn.RemoteAddr().String()))
 					}
 				}
 			}
@@ -117,23 +117,23 @@ func (h *Hub) BroadcastMessageToLot(lotID string, data []byte) {
 // Este método debe ejecutarse en una goroutine por cada cliente.
 func (c *Client) ReadPump() {
 	defer func() {
-		c.hub.UnregisterClient(c)
-		c.conn.Close()
+		c.Hub.UnregisterClient(c)
+		c.Conn.Close()
 	}()
 	// Configura timeouts si es necesario
-	// c.conn.SetReadDeadline(time.Now().Add(pongWait))
-	// c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+	// c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+	// c.Conn.SetPongHandler(func(string) error { c.Conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 
 	for {
 		// Lee el mensaje del cliente
-		mt, message, err := c.conn.ReadMessage()
+		mt, message, err := c.Conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				log.Error("WebSocket read error", zap.Error(err), zap.String("lotID", c.lotID), zap.String("remote_addr", c.conn.RemoteAddr().String()))
+				log.Error("WebSocket read error", zap.Error(err), zap.String("lotID", c.LotID), zap.String("remote_addr", c.Conn.RemoteAddr().String()))
 			}
 			break
 		}
-		// Aquí, en un hub genérico, podrías simplemente reenviar el mensaje
+		// Aquí, en un Hub genérico, podrías simplemente reenviar el mensaje
 		// o pasarlo a un canal de procesamiento si el hub tuviera esa responsabilidad.
 		// Como este hub es *sin lógica de negocio*, no procesamos el mensaje aquí.
 		// La lógica de negocio que recibe mensajes del cliente (ej: una puja)
@@ -141,7 +141,7 @@ func (c *Client) ReadPump() {
 		// a través de un mecanismo que definiremos luego (ej: un canal o callback).
 
 		// Por ahora, solo loggeamos que se recibió un mensaje (opcional)
-		log.Debug("Received message from client", zap.String("lotID", c.lotID), zap.String("remote_addr", c.conn.RemoteAddr().String()), zap.Int("message_type", mt), zap.ByteString("message_data", message))
+		log.Debug("Received message from client", zap.String("lotID", c.LotID), zap.String("remote_addr", c.Conn.RemoteAddr().String()), zap.Int("message_type", mt), zap.ByteString("message_data", message))
 
 		// Si quisieras que el hub reenviara mensajes recibidos a todos en el lote (no es el caso aquí):
 		// c.hub.BroadcastMessageToLot(c.lotID, message)
@@ -155,22 +155,22 @@ func (c *Client) WritePump() {
 	// ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		// ticker.Stop()
-		c.conn.Close()
+		c.Conn.Close()
 	}()
 	for {
 		select {
-		case message, ok := <-c.send:
+		case message, ok := <-c.Send:
 			// Recibe mensaje del canal de envío del cliente
 			if !ok {
 				// El Hub cerró el canal.
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 
 			// Escribe el mensaje al cliente
-			err := c.conn.WriteMessage(websocket.TextMessage, message)
+			err := c.Conn.WriteMessage(websocket.TextMessage, message)
 			if err != nil {
-				log.Error("WebSocket write error", zap.Error(err), zap.String("lotID", c.lotID), zap.String("remote_addr", c.conn.RemoteAddr().String()))
+				log.Error("WebSocket write error", zap.Error(err), zap.String("lotID", c.LotID), zap.String("remote_addr", c.Conn.RemoteAddr().String()))
 				return // Sale del loop, defer cerrará la conexión
 			}
 

@@ -16,22 +16,20 @@ This approach facilitates understanding and maintenance, and paves the way for a
 
 ## Key Principles
 
-*   **Domain-Driven Design (DDD):** Code is organized around the business domain (Auctions, Vehicle Catalog, Users). Entities, aggregates, and business logic reside in the domain layer.
-*   **Clean Architecture / Hexagonal Architecture:** Outer layers (Infrastructure, Interfaces) depend on inner layers (Application, Domain). The domain is the core, agnostic to technology (DB, Web Frameworks, etc.).
-*   **Repository Pattern:** Abstracts persistent data access. Domain and application layers interact with repository *interfaces*, whose concrete implementations (e.g., for PostgreSQL) live in the infrastructure layer.
-*   **Bounded Contexts:** Each module defines a clear boundary where domain terms and concepts have a specific and consistent meaning.
-
-
+- **Domain-Driven Design (DDD):** Code is organized around the business domain (Auctions, Vehicle Catalog, Users). Entities, aggregates, and business logic reside in the domain layer.
+- **Clean Architecture / Hexagonal Architecture:** Outer layers (Infrastructure, Interfaces) depend on inner layers (Application, Domain). The domain is the core, agnostic to technology (DB, Web Frameworks, etc.).
+- **Repository Pattern:** Abstracts persistent data access. Domain and application layers interact with repository _interfaces_, whose concrete implementations (e.g., for PostgreSQL) live in the infrastructure layer.
+- **Bounded Contexts:** Each module defines a clear boundary where domain terms and concepts have a specific and consistent meaning.
 
 ## Technologies
 
-*   **Backend:** Go (API, business logic, WebSocket server)
-*   **Frontend:** React (User interface, consume API and WebSocket)
-*   **Database:** PostgreSQL (Relational, for structured and transactional data)
-*   **Real-time Communication:** WebSockets (for the online auction between Backend and Frontend)
-    *   **WebSockets Explained:** A communication protocol providing full-duplex, persistent connections over a single TCP connection. Unlike traditional HTTP, both client and server can send data at any time.
-    *   **Application in AuctionEngine:** Essential for real-time features. Used to instantly push auction state updates (price, time, bids) from the server to all connected clients, synchronize the auction timer, and handle real-time bid communication. This ensures all users see the most current information without constant polling.
-*   *(Optional/Future):* gRPC (Consider for internal service communication if the monolith is broken down).
+- **Backend:** Go (API, business logic, WebSocket server)
+- **Frontend:** React (User interface, consume API and WebSocket)
+- **Database:** PostgreSQL (Relational, for structured and transactional data)
+- **Real-time Communication:** WebSockets (for the online auction between Backend and Frontend)
+  - **WebSockets Explained:** A communication protocol providing full-duplex, persistent connections over a single TCP connection. Unlike traditional HTTP, both client and server can send data at any time.
+  - **Application in AuctionEngine:** Essential for real-time features. Used to instantly push auction state updates (price, time, bids) from the server to all connected clients, synchronize the auction timer, and handle real-time bid communication. This ensures all users see the most current information without constant polling.
+- _(Optional/Future):_ gRPC (Consider for internal service communication if the monolith is broken down).
 
 ## Directory Structure (Modular Monolith in Go)
 
@@ -106,83 +104,120 @@ This approach facilitates understanding and maintenance, and paves the way for a
 
 We will start development by focusing on the most critical module: the **Auction Engine** (`/internal/auction`), which manages the real-time auction logic. This will allow us to validate the real-time technology and address core technical challenges early on.
 
-The initial goal is a *Minimum Viable Product* for auctioning a *single* auction lot.
+The initial goal is a _Minimum Viable Product_ for auctioning a _single_ auction lot.
 
 ### Phase 0: Configuration and Shared Foundations
 
-*   Set up the Go project directory structure (`go mod init`).
-*   Configure a basic logging system (`shared/logger`).
-*   Implement the PostgreSQL database connection (`shared/db`).
-*   Set up a basic HTTP server and main router (`shared/http`).
-*   Implement the **shared WebSocket Hub** (`shared/websocket/hub.go`) which will manage raw connections and sending messages to client groups (by `lotID`). This hub will contain no business logic.
-*   Set up a minimal `user` module (placeholder) with a simple `User` entity (`ID`) and a `UserRepository` interface to allow basic bidder identification. Implement a "fake" or very simple version of the repository in `/infrastructure/persistence/postgres` initially.
+- Set up the Go project directory structure (`go mod init`).
+- Configure a basic logging system (`shared/logger`).
+- Implement the PostgreSQL database connection (`shared/db`).
+- Set up a basic HTTP server and main router (`shared/http`).
+
+#### Implement Shared WebSocket Hub (`shared/websocket/hub.go`)
+
+Will manage raw connections and sending messages to client groups (by `lotID`). This hub will contain no business logic.
+
+- **WebSocket Hub (`shared/websocket/hub.go`):** A central component for managing raw WebSocket connections and routing messages. It is designed to be business-logic agnostic.
+  - **Components:**
+    - `Hub` struct: Manages registered clients, grouped by `lotID`, and handles registration, unregistration, and broadcasting via channels (`register`, `unregister`, `broadcast`).
+    - `Client` struct: Represents an individual WebSocket connection, holding the connection (`*websocket.Conn`), a channel for outbound messages (`send`), and the `lotID` the client is subscribed to.
+    - `Message` struct: A simple structure for messages containing the target `LotID` and the message `Data` (payload).
+  - **Functionality:**
+    - `Run()`: The main loop of the Hub, running in a goroutine, listening on channels to manage clients and broadcast messages to the appropriate `lotID` groups.
+    - `RegisterClient(client *Client)`: Adds a new client to the Hub, associating it with its `lotID`.
+    - `UnregisterClient(client *Client)`: Removes a client from the Hub and closes its send channel.
+    - `BroadcastMessageToLot(lotID string, data []byte)`: Sends a message to all clients currently registered under a specific `lotID`.
+    - `ReadPump()`: A goroutine per client that reads messages from the WebSocket connection. In this generic hub, it primarily logs received messages. Business logic would typically consume these messages via a separate mechanism.
+    - `WritePump()`: A goroutine per client that reads messages from the client's `send` channel and writes them to the WebSocket connection.
+
+#### Integrate WebSocket Hub with HTTP Server (`shared/httpserver/server.go`)
+
+Modify the HTTP server to accept WebSocket connections and integrate with the shared Hub.
+
+- The `Server` struct is updated to hold a reference to the `websocket.Hub`.
+- The `NewServer` function now receives the `*websocket.Hub` instance as a parameter.
+- A Fiber middleware is added (`app.Use("/ws", ...)`) to handle the WebSocket upgrade handshake for any path starting with `/ws`.
+- A specific route `/ws/auction/:lotId` is defined using `fiberWebsocket.New()`. This creates a WebSocket endpoint.
+- The handler function for this route performs the following steps for each new WebSocket connection:
+  - Extracts the `lotId` from the URL parameters.
+  - Creates a new `websocket.Client` instance, linking it to the shared `Hub` and the current `fiberWebsocket.Conn`. Note: The `Client` struct's `hub` field was made public (`Hub`) to allow assignment from another package.
+  - Registers the newly created `Client` with the `Hub` using `hub.RegisterClient(client)`.
+  - Starts two goroutines for the client: `client.WritePump()` (to send messages from the Hub to the client) and `client.ReadPump()` (to read messages from the client and pass them to the Hub's channels). `ReadPump` is typically run in the main handler goroutine as it blocks until the connection closes.
+
+#### Wiring in `cmd/server/main.go`
+
+The main application entry point (`cmd/server/main.go`) is updated to:
+
+- Instantiate the `websocket.Hub` using `websocket.NewHub()`.
+- Start the `Hub`'s main loop in a goroutine (`go hub.Run()`).
+- Pass the created `Hub` instance to the `httpserver.NewServer()` function during server initialization.
+
+- Set up a minimal `user` module (placeholder) with a simple `User` entity (`ID`) and a `UserRepository` interface to allow basic bidder identification. Implement a "fake" or very simple version of the repository in `/infrastructure/persistence/postgres` initially.
 
 ### Phase 1: Backend - Core `auction` Module
 
-*   **Domain (`/internal/auction/domain`):**
-    *   Model `AuctionLot` as an aggregate root with its attributes (`CurrentPrice`, `EndTime`, `State`, `sync.Mutex`), and the `PlaceBid(userID, amount, minIncrement)` method containing business validation logic and state updates *within the aggregate*. Implement basic timer/time extension logic within domain methods if possible, or at least define the necessary fields (`EndTime`, `LastBidTime`, `TimeExtension`).
-    *   Model `Bid` as an entity or value object.
-    *   Define the `AuctionLotRepository` and `BidRepository` interfaces.
-*   **Infrastructure/Persistence (`/internal/auction/infrastructure/persistence/postgres`):**
-    *   Implement `AuctionLotRepository` and `BidRepository` using the shared database connection (`shared/db`). Ensure the use of **database transactions** when saving a valid bid and updating the lot's state to guarantee atomicity.
-*   **Application (`/internal/auction/application`):**
-    *   Implement the use cases: `PlaceBidUseCase` (orchestrates: loads lot, calls `lot.PlaceBid()`, saves lot/bid via repositories), `GetLotStateUseCase` (loads state/recent bids via repositories), `JoinLotWSUseCase` (orchestrates initial state and registration with the shared WS Hub).
-    *   Define and implement the `AuctionService` interface that exposes the necessary methods for the infrastructure (e.g., `PlaceBid(cmd)`, `GetLotState(lotID)`, `ProcessIncomingWSMessage(client, message)`).
-*   **Infrastructure/WebSocket (`/internal/auction/infrastructure/websocket`):**
-    *   Define the JSON message structures (`messages.go`) for WebSocket communication (e.g., `ClientBidMessage`, `ServerLotUpdateMessage`).
-    *   Implement the module-specific `handlers.go` functions called by the `shared/websocket/hub` upon receiving a message for an auction lot. These handlers deserialize the message and call the appropriate application use case (`PlaceBidUseCase`) through the `AuctionService` interface. If the use case call is successful, they notify the `shared/websocket/hub` to broadcast the update (`ServerLotUpdateMessage`).
-*   **Wiring (`cmd/server/main.go`):**
-    *   Instantiate all components (`shared`, repositories, use cases, `AuctionService`).
-    *   Inject dependencies (e.g., use cases receive repositories, `AuctionService` receives use cases, WS handlers receive `AuctionService` and `shared/websocket/hub`).
-    *   Configure the HTTP/WS route `/ws/auction/{lotId}` on the main router. The handler for this route gets the `lotId` from the URL, calls `sharedWebsocketHub.RegisterClient` to add the client. When the hub receives a message from this client, it calls a method on the `AuctionService` (e.g., `auctionService.ProcessIncomingWSMessage(client, message)`) for the auction module to handle the message logic.
-    *   Mount this WS handler on the main router.
-    *   Implement the backend timer: A main goroutine or one within the `shared/websocket/hub` or an `auction` application service (`application/auction/timer_service.go`) that periodically (e.g., every second) iterates over active lots, updates their time state, and asks the `shared/websocket/hub` to broadcast the `ServerLotUpdateMessage`. Implement the "time extension" logic.
-    *   Start the HTTP server.
+- **Domain (`/internal/auction/domain`):**
+  - Model `AuctionLot` as an aggregate root with its attributes (`CurrentPrice`, `EndTime`, `State`, `sync.Mutex`), and the `PlaceBid(userID, amount, minIncrement)` method containing business validation logic and state updates _within the aggregate_. Implement basic timer/time extension logic within domain methods if possible, or at least define the necessary fields (`EndTime`, `LastBidTime`, `TimeExtension`).
+  - Model `Bid` as an entity or value object.
+  - Define the `AuctionLotRepository` and `BidRepository` interfaces.
+- **Infrastructure/Persistence (`/internal/auction/infrastructure/persistence/postgres`):**
+  - Implement `AuctionLotRepository` and `BidRepository` using the shared database connection (`shared/db`). Ensure the use of **database transactions** when saving a valid bid and updating the lot's state to guarantee atomicity.
+- **Application (`/internal/auction/application`):**
+  - Implement the use cases: `PlaceBidUseCase` (orchestrates: loads lot, calls `lot.PlaceBid()`, saves lot/bid via repositories), `GetLotStateUseCase` (loads state/recent bids via repositories), `JoinLotWSUseCase` (orchestrates initial state and registration with the shared WS Hub).
+  - Define and implement the `AuctionService` interface that exposes the necessary methods for the infrastructure (e.g., `PlaceBid(cmd)`, `GetLotState(lotID)`, `ProcessIncomingWSMessage(client, message)`).
+- **Infrastructure/WebSocket (`/internal/auction/infrastructure/websocket`):**
+  - Define the JSON message structures (`messages.go`) for WebSocket communication (e.g., `ClientBidMessage`, `ServerLotUpdateMessage`).
+  - Implement the module-specific `handlers.go` functions called by the `shared/websocket/hub` upon receiving a message for an auction lot. These handlers deserialize the message and call the appropriate application use case (`PlaceBidUseCase`) through the `AuctionService` interface. If the use case call is successful, they notify the `shared/websocket/hub` to broadcast the update (`ServerLotUpdateMessage`).
+- **Wiring (`cmd/server/main.go`):**
+  - Instantiate all components (`shared`, repositories, use cases, `AuctionService`).
+  - Inject dependencies (e.g., use cases receive repositories, `AuctionService` receives use cases, WS handlers receive `AuctionService` and `shared/websocket/hub`).
+  - Configure the HTTP/WS route `/ws/auction/{lotId}` on the main router. The handler for this route gets the `lotId` from the URL, calls `sharedWebsocketHub.RegisterClient` to add the client. When the hub receives a message from this client, it calls a method on the `AuctionService` (e.g., `auctionService.ProcessIncomingWSMessage(client, message)`) for the auction module to handle the message logic.
+  - Mount this WS handler on the main router.
+  - Implement the backend timer: A main goroutine or one within the `shared/websocket/hub` or an `auction` application service (`application/auction/timer_service.go`) that periodically (e.g., every second) iterates over active lots, updates their time state, and asks the `shared/websocket/hub` to broadcast the `ServerLotUpdateMessage`. Implement the "time extension" logic.
+  - Start the HTTP server.
 
 ### Phase 2: Frontend - Interface and Real-time Connection
 
-*   Set up the React project.
-*   Implement the basic user interface for a single auction lot (display current price, time, recent bids, bidding form). Consider Material Design.
-*   Use `fetch` or `axios` to get the initial lot state via a backend REST endpoint (e.g., `/api/v1/auction/lots/{lotId}`).
-*   Establish and manage the WebSocket connection to the backend endpoint `/ws/auction/{lotId}`.
-*   Implement the logic to send `ClientBidMessage` (JSON) messages via WebSocket when placing a bid.
-*   Implement the logic to listen for `ServerLotUpdateMessage` messages from the WebSocket and update the UI state (`useState`, `useReducer`, or state library) to reflect the current price, remaining time, and bid list.
-*   Ensure the UI is responsive.
+- Set up the React project.
+- Implement the basic user interface for a single auction lot (display current price, time, recent bids, bidding form). Consider Material Design.
+- Use `fetch` or `axios` to get the initial lot state via a backend REST endpoint (e.g., `/api/v1/auction/lots/{lotId}`).
+- Establish and manage the WebSocket connection to the backend endpoint `/ws/auction/{lotId}`.
+- Implement the logic to send `ClientBidMessage` (JSON) messages via WebSocket when placing a bid.
+- Implement the logic to listen for `ServerLotUpdateMessage` messages from the WebSocket and update the UI state (`useState`, `useReducer`, or state library) to reflect the current price, remaining time, and bid list.
+- Ensure the UI is responsive.
 
 ### Phase 3: Integration and Testing
 
-*   Run the backend and frontend.
-*   Test the full flow of placing bids from multiple clients simultaneously.
-*   Verify real-time synchronization of price and timer.
-*   Verify that the time extension logic works correctly.
-*   Test the persistence of bids and final state in the database.
-*   Debug concurrency and synchronization issues.
+- Run the backend and frontend.
+- Test the full flow of placing bids from multiple clients simultaneously.
+- Verify real-time synchronization of price and timer.
+- Verify that the time extension logic works correctly.
+- Test the persistence of bids and final state in the database.
+- Debug concurrency and synchronization issues.
 
 ### Phase 4: Initial Refinement and Robustness
 
-*   Implement a basic authentication system (even if simplified) to identify bidding users more robustly. This will involve starting minimal development in the `user` module.
-*   Improve backend bid validation and frontend error feedback.
-*   Implement basic WebSocket reconnection handling.
-*   Ensure proper cleanup of resources (goroutines, DB connections, WS connections) when auctions end or the application shuts down.
+- Implement a basic authentication system (even if simplified) to identify bidding users more robustly. This will involve starting minimal development in the `user` module.
+- Improve backend bid validation and frontend error feedback.
+- Implement basic WebSocket reconnection handling.
+- Ensure proper cleanup of resources (goroutines, DB connections, WS connections) when auctions end or the application shuts down.
 
 ## Key Technical Challenges
 
-*   **Real-time and Concurrency:** Ensuring auction state consistency and correct synchronization across multiple users and the server, especially under load.
-*   **Timer Synchronization:** Implementing the timer logic on the server as the source of truth and keeping it synchronized across all clients, including handling "time extension".
-*   **Bid Ordering:** Guaranteeing that bids are processed in the correct order on the backend, even if they arrive nearly simultaneously.
-*   **Scalability:** Designing the system to handle an increasing number of concurrent users and active auctions.
-*   **Data Consistency:** Ensuring that bids and the final state are persisted atomically in the database.
+- **Real-time and Concurrency:** Ensuring auction state consistency and correct synchronization across multiple users and the server, especially under load.
+- **Timer Synchronization:** Implementing the timer logic on the server as the source of truth and keeping it synchronized across all clients, including handling "time extension".
+- **Bid Ordering:** Guaranteeing that bids are processed in the correct order on the backend, even if they arrive nearly simultaneously.
+- **Scalability:** Designing the system to handle an increasing number of concurrent users and active auctions.
+- **Data Consistency:** Ensuring that bids and the final state are persisted atomically in the database.
 
 ## Future Modules (Monolith Expansion)
 
 Once the core `auction` module is functional, the other modules can be added to complete the platform:
 
-*   **`catalog`:** Vehicle management (CRUD, photo/document uploads, associating with lots).
-*   **`user`:** Full authentication, user profile management (contact details, perhaps payment/billing info).
-*   **`admin`:** Administration panel to manage users, vehicles, create and configure auctions/lots, view reports.
-*   **`history`:** Viewing past auctions, including bidders and final results per lot.
-*   **`notification`:** Notification system (e.g., outbid, auction starting soon).
+- **`catalog`:** Vehicle management (CRUD, photo/document uploads, associating with lots).
+- **`user`:** Full authentication, user profile management (contact details, perhaps payment/billing info).
+- **`admin`:** Administration panel to manage users, vehicles, create and configure auctions/lots, view reports.
+- **`history`:** Viewing past auctions, including bidders and final results per lot.
+- **`notification`:** Notification system (e.g., outbid, auction starting soon).
 
 Each of these modules will be developed following the same internal structure (Domain, Application, Infrastructure) and integrated into the monolith via `main.go`, interacting with other modules through interfaces.
-
----
