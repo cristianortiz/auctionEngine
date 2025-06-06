@@ -10,13 +10,13 @@ import (
 
 var log = logger.GetLogger()
 
-// Hub mantiene el registro de clientes y maneja la transmisión de mensajes.
+// Hub keeps client's registry and handle messages broadcasting
 type Hub struct {
 	// Registered clients, grouped by lot ID.
 	// The keys of the outer map are lot IDs.
 	// The inner map keys are clients, and the boolean value is ignored.
 	clients map[string]map[*Client]bool
-	// Inbound messages from the clients.
+	// Inbound messages from the clien
 	broadcast chan *Message
 	// Register requests from the clients.
 	register chan *Client
@@ -79,16 +79,17 @@ func (h *Hub) Run() {
 			}
 
 		case message := <-h.broadcast:
-			// Transmite el mensaje a todos los clientes en el grupo del LotID
+			//broadcast the message to all the clients in LotID group
 			if clients, ok := h.clients[message.LotID]; ok {
 				log.Debug("Broadcasting message to lot", zap.String("LotID", message.LotID), zap.Int("clients", len(clients)))
 				for client := range clients {
 					select {
 					case client.Send <- message.Data:
-						// Mensaje enviado
+						// message sended
 					default:
-						// No se pudo enviar, cliente probablemente desconectado
+						//message could not be sent, client probably disconneted, closing channel
 						close(client.Send)
+						//deleting client form client's map
 						delete(clients, client)
 						log.Warn("Failed to Send message to client, unregistering", zap.String("lotID", client.LotID), zap.String("remote_addr", client.Conn.RemoteAddr().String()))
 					}
