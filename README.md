@@ -66,7 +66,7 @@ This approach facilitates understanding and maintenance, and paves the way for a
                 service.go          # AuctionService interface (exposes module functionality)
 
             /infrastructure     # Concrete implementations (DB, WS handlers, HTTP handlers)
-                /persistence        # Repository implementations
+                /repository         # Repository implementations (formerly persistence)
                     /postgres
                         auction_lot_repository.go # Implements domain.auction.AuctionLotRepository
                         bid_repository.go         # Implements domain.auction.BidRepository
@@ -81,13 +81,13 @@ This approach facilitates understanding and maintenance, and paves the way for a
         /catalog            # Module/Context: Catalog (Vehicle Management & Listing) - **PENDING**
             /domain             # Vehicle entity, VehicleRepository interface
             /application        # Use cases (GetVehicleDetails, ListVehicles), CatalogQueryService interface
-            /infrastructure     # Persistence (Postgres VehicleRepository), HTTP handlers
+            /infrastructure     # Repository (Postgres VehicleRepository), HTTP handlers
             # ...
 
         /user               # Module/Context: User / Identity (Authentication & Profiles) - **PENDING**
             /domain             # User entity, UserRepository interface, AuthenticationService interface
             /application        # Use cases (RegisterUser, LoginUser), UserService interface
-            /infrastructure     # Persistence (Postgres UserRepository), Authentication implementation, HTTP handlers
+            /infrastructure     # Repository (Postgres UserRepository), Authentication implementation, HTTP handlers
             # ...
 
         # /admin            # Module/Context: Administration - **PENDING**
@@ -152,7 +152,7 @@ The main application entry point (`cmd/server/main.go`) is updated to:
 - Start the `Hub`'s main loop in a goroutine (`go hub.Run()`).
 - Pass the created `Hub` instance to the `httpserver.NewServer()` function during server initialization.
 
-- Set up a minimal `user` module (placeholder) with a simple `User` entity (`ID`) and a `UserRepository` interface to allow basic bidder identification. Implement a "fake" or very simple version of the repository in `/infrastructure/persistence/postgres` initially.
+- Set up a minimal `user` module (placeholder) with a simple `User` entity (`ID`) and a `UserRepository` interface to allow basic bidder identification. Implement a "fake" or very simple version of the repository in `/infrastructure/repository/postgres` initially.
 
 ### Phase 1: Backend - Core `auction` Module
 
@@ -160,7 +160,7 @@ The main application entry point (`cmd/server/main.go`) is updated to:
   - Model `AuctionLot` as an aggregate root with its attributes (`CurrentPrice`, `EndTime`, `State`, `sync.Mutex`), and the `PlaceBid(userID, amount, minIncrement)` method containing business validation logic and state updates _within the aggregate_. Implement basic timer/time extension logic within domain methods if possible, or at least define the necessary fields (`EndTime`, `LastBidTime`, `TimeExtension`).
   - Model `Bid` as an entity or value object.
   - Define the `AuctionLotRepository` and `BidRepository` interfaces.
-- **Infrastructure/Persistence (`/internal/auction/infrastructure/persistence/postgres`):**
+- **Infrastructure/Repository (`/internal/auction/infrastructure/repository/postgres`):**
   - Implement `AuctionLotRepository` and `BidRepository` using the shared database connection (`shared/db`). Ensure the use of **database transactions** when saving a valid bid and updating the lot's state to guarantee atomicity.
 - **Application (`/internal/auction/application`):**
   - Implement the use cases: `PlaceBidUseCase` (orchestrates: loads lot, calls `lot.PlaceBid()`, saves lot/bid via repositories), `GetLotStateUseCase` (loads state/recent bids via repositories), `JoinLotWSUseCase` (orchestrates initial state and registration with the shared WS Hub).
@@ -168,7 +168,8 @@ The main application entry point (`cmd/server/main.go`) is updated to:
 - **Infrastructure/WebSocket (`/internal/auction/infrastructure/websocket`):**
   - Define the JSON message structures (`messages.go`) for WebSocket communication (e.g., `ClientBidMessage`, `ServerLotUpdateMessage`).
   - Implement the module-specific `handlers.go` functions called by the `shared/websocket/hub` upon receiving a message for an auction lot. These handlers deserialize the message and call the appropriate application use case (`PlaceBidUseCase`) through the `AuctionService` interface. If the use case call is successful, they notify the `shared/websocket/hub` to broadcast the update (`ServerLotUpdateMessage`).
-- **Wiring (`cmd/server/main.go`):**
+
+* **Wiring (`cmd/server/main.go`):**
   - Instantiate all components (`shared`, repositories, use cases, `AuctionService`).
   - Inject dependencies (e.g., use cases receive repositories, `AuctionService` receives use cases, WS handlers receive `AuctionService` and `shared/websocket/hub`).
   - Configure the HTTP/WS route `/ws/auction/{lotId}` on the main router. The handler for this route gets the `lotId` from the URL, calls `sharedWebsocketHub.RegisterClient` to add the client. When the hub receives a message from this client, it calls a method on the `AuctionService` (e.g., `auctionService.ProcessIncomingWSMessage(client, message)`) for the auction module to handle the message logic.

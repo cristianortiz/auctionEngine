@@ -9,6 +9,7 @@ import (
 	"github.com/cristianortiz/auctionEngine/internal/shared/httpserver"
 	"github.com/cristianortiz/auctionEngine/internal/shared/logger"
 	"github.com/cristianortiz/auctionEngine/internal/shared/websocket"
+	userRepository "github.com/cristianortiz/auctionEngine/internal/user/infrastructure/repository/postgres"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
@@ -29,6 +30,10 @@ func main() {
 
 	conn := db.GetPostgresDB()
 	defer conn.Close(context.Background())
+
+	//init user repository
+	userRepo := userRepository.NewUserRepository(conn)
+	logger.Info("User repository initialized")
 
 	//init webSocket hub and runs it in a goroutine
 	hub := websocket.NewHub()
