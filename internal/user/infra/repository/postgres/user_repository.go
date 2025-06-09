@@ -6,16 +6,17 @@ import (
 
 	"github.com/cristianortiz/auctionEngine/internal/user/domain" // Importa el dominio del usuario
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/jackc/pgx/v5"
 )
 
 // UserRepository implementa la interfaz domain.UserRepository para PostgreSQL.
 type UserRepository struct {
-	db *pgx.Conn
+	db *pgxpool.Pool
 }
 
 // NewUserRepository crea una nueva instancia de UserRepository.
-func NewUserRepository(db *pgx.Conn) *UserRepository {
+func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 	return &UserRepository{db: db}
 }
 

@@ -9,7 +9,7 @@ import (
 	"github.com/cristianortiz/auctionEngine/internal/shared/httpserver"
 	"github.com/cristianortiz/auctionEngine/internal/shared/logger"
 	"github.com/cristianortiz/auctionEngine/internal/shared/websocket"
-	userRepository "github.com/cristianortiz/auctionEngine/internal/user/infrastructure/repository/postgres"
+	userRepository "github.com/cristianortiz/auctionEngine/internal/user/infra/repository/postgres"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
@@ -28,11 +28,15 @@ func main() {
 	}
 	logger.Info("Database migrations completed successfully.")
 
-	conn := db.GetPostgresDB()
-	defer conn.Close(context.Background())
+	dbPool, err := db.GetPostgresDBPool(context.Background())
+	if err != nil {
+		logger.Fatal("failed to connect to DBpool", zap.Error(err))
+	}
+	defer dbPool.Close()
+	logger.Info("DB pool connected")
 
 	//init user repository
-	userRepo := userRepository.NewUserRepository(conn)
+	userRepo := userRepository.NewUserRepository(dbPool)
 	logger.Info("User repository initialized")
 
 	//init webSocket hub and runs it in a goroutine
