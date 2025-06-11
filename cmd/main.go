@@ -9,7 +9,6 @@ import (
 	"github.com/cristianortiz/auctionEngine/internal/shared/httpserver"
 	"github.com/cristianortiz/auctionEngine/internal/shared/logger"
 	"github.com/cristianortiz/auctionEngine/internal/shared/websocket"
-	userRepository "github.com/cristianortiz/auctionEngine/internal/user/infra/repository/postgres"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
@@ -36,8 +35,8 @@ func main() {
 	logger.Info("DB pool connected")
 
 	//init user repository
-	userRepo := userRepository.NewUserRepository(dbPool)
-	logger.Info("User repository initialized")
+	// userRepo := userRepository.NewUserRepository(dbPool)
+	// logger.Info("User repository initialized")
 
 	//init webSocket hub and runs it in a goroutine
 	hub := websocket.NewHub()

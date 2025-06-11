@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16
+    image: postgres:alpine
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
