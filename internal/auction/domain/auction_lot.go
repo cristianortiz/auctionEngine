@@ -29,8 +29,10 @@ type AuctionLot struct {
 	CurrentPrice  float64
 	EndTime       time.Time
 	State         AuctionLotState
-	LastBidTime   time.Time     //for time extension logic
+	LastBidTime   *time.Time    //for time extension logic
 	TimeExtension time.Duration // time extension period  for bid
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 	//to protect concurrent state of lot during bids flow
 	//very important for thread safety in concurrent environment (websockets)
 	mu sync.Mutex
@@ -57,7 +59,6 @@ func (al *AuctionLot) PlaceBid(userID uuid.UUID, amount float64, minIncrement fl
 	//ensures the mutex is released when function ends
 	defer al.mu.Unlock()
 	//bussiles logic validations
-	// Validaciones de negocio
 	if al.State != StateActive {
 		log.Warn("Bid rejected: Lot not active",
 			zap.String("lotID", al.ID.String()),
@@ -78,7 +79,7 @@ func (al *AuctionLot) PlaceBid(userID uuid.UUID, amount float64, minIncrement fl
 		return nil, ErrBidAmountTooLow
 	}
 
-	// Opcional: Validar incremento mínimo
+	// Optional: validates minimum increment
 	// if amount < al.CurrentPrice + minIncrement {
 	// 	log.Warn("Bid rejected: Increment too small",
 	// 		zap.String("lotID", al.ID.String()),
@@ -92,6 +93,7 @@ func (al *AuctionLot) PlaceBid(userID uuid.UUID, amount float64, minIncrement fl
 
 	//time extension logic, if the bid occurs near to the end
 	originalEndTime := al.EndTime
+	now := time.Now()
 	if time.Now().Add(al.TimeExtension).After(al.EndTime) {
 		al.EndTime = time.Now().Add(al.TimeExtension)
 		//a log entry musy be useful, consider it
@@ -106,9 +108,9 @@ func (al *AuctionLot) PlaceBid(userID uuid.UUID, amount float64, minIncrement fl
 
 	//updates lot state
 	al.CurrentPrice = amount
-	al.LastBidTime = time.Now()
+	al.LastBidTime = &now
 	//cretes new bid
-	newBid := NewBid(uuid.New(), al.ID, userID, amount, time.Now())
+	newBid := NewBid(uuid.New(), al.ID, userID, amount, now)
 	// adds the bid to the list, remember this is a simplyfied way to do it
 	al.Bids = append(al.Bids, newBid)
 
@@ -166,7 +168,7 @@ func (al *AuctionLot) Finish() error {
 	return nil
 }
 
-// Cancel cancela la subasta si está pendiente o activa.
+// Cancel auction
 func (al *AuctionLot) Cancel() error {
 	al.mu.Lock()
 	defer al.mu.Unlock()

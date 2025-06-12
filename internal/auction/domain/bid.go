@@ -14,6 +14,7 @@ type Bid struct {
 	UserID    uuid.UUID //users id who makes the bid
 	Amount    float64
 	Timestamp time.Time
+	CreatedAt time.Time
 }
 
 // NewBid creates a new Bid instance
@@ -24,6 +25,7 @@ func NewBid(id, lotID, userID uuid.UUID, amount float64, timestamp time.Time) *B
 		UserID:    userID,
 		Amount:    amount,
 		Timestamp: timestamp,
+		CreatedAt: time.Now(),
 	}
 
 }
