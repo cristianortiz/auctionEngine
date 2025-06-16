@@ -163,8 +163,41 @@ The main application entry point (`cmd/server/main.go`) is updated to:
 - **Infrastructure/Repository (`/internal/auction/infrastructure/repository/postgres`):**
   - Implement `AuctionLotRepository` and `BidRepository` using the shared database connection (`shared/db`). Ensure the use of **database transactions** when saving a valid bid and updating the lot's state to guarantee atomicity.
 - **Application (`/internal/auction/application`):**
+
   - Implement the use cases: `PlaceBidUseCase` (orchestrates: loads lot, calls `lot.PlaceBid()`, saves lot/bid via repositories), `GetLotStateUseCase` (loads state/recent bids via repositories), `JoinLotWSUseCase` (orchestrates initial state and registration with the shared WS Hub).
   - Define and implement the `AuctionService` interface that exposes the necessary methods for the infrastructure (e.g., `PlaceBid(cmd)`, `GetLotState(lotID)`, `ProcessIncomingWSMessage(client, message)`).
+
+  **Understanding the Application Layer and Use Cases:**
+
+  The Application layer acts as the **orchestrator** of the business logic defined in the Domain layer. It defines the application's capabilities in terms of **Use Cases**.
+
+  - **Use Cases (Interactors):** Each Use Case represents a specific action or task that a user or the system can perform (e.g., "Place a Bid", "Get Lot State"). They encapsulate the sequence of steps required to fulfill a business task by coordinating interactions between the Domain and Infrastructure layers.
+
+    - They receive **Commands** (Input DTOs) with necessary data.
+    - They return **Results** (Output DTOs) or errors.
+    - They depend on **interfaces** defined in the Domain (like Repositories) and potentially other services, but **never** on concrete infrastructure implementations.
+
+  - **DTOs (Data Transfer Objects):** Simple data structures used to transfer data between layers or across application boundaries (e.g., between Infrastructure and Application). They are distinct from Domain Entities and Aggregates and do not contain business logic.
+
+    - `PlaceBidCommand`: An input DTO for the `PlaceBidUseCase`, containing data like `LotID`, `UserID`, `Amount`.
+    - `LotStateDTO`, `BidDTO`: Output DTOs for the `GetLotStateUseCase`, representing the data structure to be presented to the user interface.
+
+  - **Domain Entities/Aggregates (`AuctionLot`, `Bid`):** These live in the Domain layer and contain the **business logic** and maintain consistency. They are agnostic to how data is stored or presented.
+
+  **Example: The `PlaceBidUseCase` Flow:**
+
+  1.  **Input:** Receives a `PlaceBidCommand` (DTO) with `LotID`, `UserID`, `Amount`.
+  2.  **Validation:** Performs basic validation on the input command (e.g., `Amount > 0`).
+  3.  **Transaction:** Initiates a database transaction using the injected DB pool (from Infrastructure). This is crucial for atomicity.
+  4.  **Load Aggregate:** Uses the `AuctionLotRepository` (interface from Domain, implemented in Infrastructure) to load the `AuctionLot` aggregate by its ID **within the transaction**.
+  5.  **Call Domain Logic:** Calls the business method `lot.PlaceBid(userID, amount, minIncrement)` on the loaded `AuctionLot` aggregate. The Domain handles the core business rules (check lot state, time, amount, update price, create `Bid` entity).
+  6.  **Handle Domain Errors:** If `lot.PlaceBid` returns a domain error (e.g., `ErrLotNotActive`, `ErrBidAmountTooLow`), the Use Case captures it and returns it. The transaction `defer` handles the rollback.
+  7.  **Persist Changes:** If the domain logic is successful, the Use Case uses the `BidRepository` and `AuctionLotRepository` (interfaces from Domain, implemented in Infrastructure) to **save** the new `Bid` entity and the updated `AuctionLot` aggregate **using the transaction object (`pgx.Tx`)**.
+  8.  **Commit/Rollback:** The `defer` function ensures the transaction is committed if no errors occurred, or rolled back if any error (including panics) happened during the execution.
+  9.  **Output:** Returns the newly created `Bid` entity (or a relevant DTO) or the encountered error.
+
+  This structure ensures that the core business logic remains in the Domain, the persistence details are in Infrastructure, and the Application layer orchestrates the flow for each specific task, maintaining data consistency through transactions.
+
 - **Infrastructure/WebSocket (`/internal/auction/infrastructure/websocket`):**
   - Define the JSON message structures (`messages.go`) for WebSocket communication (e.g., `ClientBidMessage`, `ServerLotUpdateMessage`).
   - Implement the module-specific `handlers.go` functions called by the `shared/websocket/hub` upon receiving a message for an auction lot. These handlers deserialize the message and call the appropriate application use case (`PlaceBidUseCase`) through the `AuctionService` interface. If the use case call is successful, they notify the `shared/websocket/hub` to broadcast the update (`ServerLotUpdateMessage`).

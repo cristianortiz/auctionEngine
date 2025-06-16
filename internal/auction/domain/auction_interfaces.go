@@ -2,19 +2,21 @@ package domain
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type AuctionLotRepository interface {
-	GetByID(ctx context.Context, id uuid.UUID) (AuctionLot, error)
-	Save(ctx context.Context, lot *AuctionLot) error
+	GetByID(ctx context.Context, id uuid.UUID) (*AuctionLot, error)
+	Save(ctx context.Context, tx pgxpool.Tx, lot *AuctionLot) error
+	GetActiveLots(ctx context.Context) ([]*AuctionLot, error)
+	GetLotsEndingSoon(ctx context.Context, threshold time.Duration) ([]*AuctionLot, error)
 }
 
-// BidRepository interface and repo is necesary for provide access to bid ops, even if Bid is and agreggates of AuctionLot type
-// for now a save() methos is enough
 type BidRepository interface {
-	Save(ctx context.Context, bid *Bid) error
-	//get all the bids for a specific lot
-	GetByLotID(ctx context.Context, lotID uuid.UUID, limit int) ([]*Bid, error)
+	Save(ctx context.Context, tx pgxpool.Tx, bid *Bid) error
+	GetBidsByLotID(ctx context.Context, lotID uuid.UUID) ([]*Bid, error)
+	GetLatestBidByLotID(ctx context.Context, lotID uuid.UUID) (*Bid, error)
 }

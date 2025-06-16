@@ -21,12 +21,12 @@ func NewBidRepository(pool *pgxpool.Pool) *BidRepository {
 }
 
 // this method only inserts a new bid, the logic for the transaction for update the lot, will be created in application layer
-func (r *BidRepository) Save(ctx context.Context, bid *domain.Bid) error {
+func (r *BidRepository) Save(ctx context.Context, tx pgx.Tx, bid *domain.Bid) error {
 	query := `
         INSERT INTO bids (id, lot_id, user_id, amount, timestamp, created_at)
         VALUES ($1, $2, $3, $4, $5, $6)
     `
-	_, err := r.pool.Exec(ctx, query,
+	_, err := tx.Exec(ctx, query,
 		bid.ID,
 		bid.LotID,
 		bid.UserID,

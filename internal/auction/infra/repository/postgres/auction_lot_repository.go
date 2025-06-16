@@ -7,8 +7,8 @@ import (
 
 	"github.com/cristianortiz/auctionEngine/internal/auction/domain"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"         // Usar pgx/v5
-	"github.com/jackc/pgx/v5/pgxpool" // Usar pgx/v5
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // AuctionLotRepository implements domain.AuctionLotRepository interface
@@ -18,13 +18,13 @@ type AuctionLotRepository struct {
 
 // NewAuctionLotRepository creates a new instance of AuctionRepository
 func NewAuctionLotRepository(pool *pgxpool.Pool) *AuctionLotRepository {
-	return &AuctionLotRepository{pool: pool} // Corregido: asignar el pool
+	return &AuctionLotRepository{pool: pool}
 }
 
 // Save guarda o actualiza un AuctionLot en la base de datos.
 // Utiliza INSERT ON CONFLICT para manejar tanto la creación como la actualización.
 // Omitimos created_at y updated_at en el INSERT inicial para usar los DEFAULT/TRIGGER de la DB.
-func (r *AuctionLotRepository) Save(ctx context.Context, lot *domain.AuctionLot) error {
+func (r *AuctionLotRepository) Save(ctx context.Context, tx pgx.Tx, lot *domain.AuctionLot) error {
 	query := `
         INSERT INTO auction_lots (id, title, description, initial_price, current_price, end_time, state, last_bid_time, time_extension)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -38,9 +38,9 @@ func (r *AuctionLotRepository) Save(ctx context.Context, lot *domain.AuctionLot)
             state = EXCLUDED.state,
             last_bid_time = EXCLUDED.last_bid_time,
             time_extension = EXCLUDED.time_extension,
-            updated_at = NOW(); -- El trigger también lo hará, pero es explícito aquí
+            updated_at = NOW(); 
     `
-	_, err := r.pool.Exec(ctx, query,
+	_, err := tx.Exec(ctx, query,
 		lot.ID,
 		lot.Title,
 		lot.Description,
@@ -50,7 +50,6 @@ func (r *AuctionLotRepository) Save(ctx context.Context, lot *domain.AuctionLot)
 		lot.State,
 		lot.LastBidTime,
 		lot.TimeExtension,
-		// Omitimos created_at y updated_at aquí para que la DB use los defaults/trigger
 	)
 	return err
 }
