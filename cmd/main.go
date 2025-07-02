@@ -4,6 +4,9 @@ import (
 	"context"
 	"os"
 
+	"github.com/cristianortiz/auctionEngine/internal/auction/application"
+	"github.com/cristianortiz/auctionEngine/internal/auction/infra/repository/postgres"
+	wsh "github.com/cristianortiz/auctionEngine/internal/auction/infra/websocket"
 	"github.com/cristianortiz/auctionEngine/internal/shared/db"
 	"github.com/cristianortiz/auctionEngine/internal/shared/db/migrations"
 	"github.com/cristianortiz/auctionEngine/internal/shared/httpserver"
@@ -16,35 +19,50 @@ import (
 func main() {
 	_ = godotenv.Load()
 	port := os.Getenv("HTTP_PORT")
-	logger := logger.GetLogger()
-	defer logger.Sync()
+	log := logger.GetLogger()
+	defer log.Sync()
 
-	logger.Info("Starting AuctionEngine server...")
+	log.Info("Starting AuctionEngine server...")
 
-	logger.Info("Running database migrations...")
+	log.Info("Running database migrations...")
 	if err := migrations.RunMigrations(); err != nil {
-		logger.Fatal("Database migration failed", zap.Error(err))
+		log.Fatal("Database migration failed", zap.Error(err))
 	}
-	logger.Info("Database migrations completed successfully.")
+	log.Info("Database migrations completed successfully.")
 
 	dbPool, err := db.GetPostgresDBPool(context.Background())
 	if err != nil {
-		logger.Fatal("failed to connect to DBpool", zap.Error(err))
+		log.Fatal("failed to connect to DBpool", zap.Error(err))
 	}
 	defer dbPool.Close()
-	logger.Info("DB pool connected")
+	log.Info("DB pool connected")
 
-	//init user repository
-	// userRepo := userRepository.NewUserRepository(dbPool)
-	// logger.Info("User repository initialized")
+	//--- Init repositorys ----
+	lotRepo := postgres.NewAuctionLotRepository(dbPool)
+	log.Info("Lot repository initialized")
+	bidRepo := postgres.NewBidRepository(dbPool)
+	log.Info("Lot repository initialized")
 
-	//init webSocket hub and runs it in a goroutine
+	//--- Init uses cases
+	placeBidUC := application.NewPlaceBidUseCase(lotRepo, bidRepo, dbPool)
+	getLostStateUC := application.NewGetLotStateUseCase(lotRepo, bidRepo)
+
+	//---Init app service
+	auctionService := application.NewAuctionService(placeBidUC, getLostStateUC)
+
+	//-- Init webSocket hub and runs it in a goroutine
 	hub := websocket.NewHub()
-	go hub.Run()
-	logger.Info("WebSocket Hub started.")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hub.Run(ctx)
 
-	server := httpserver.NewServer(":"+port, hub)
+	//-- init handler, remember this came from Ws handler internal/infra/websocket
+	auctionWSHandler := wsh.NewAuctionWSHandler(auctionService, hub)
+	go auctionWSHandler.ListenForMessages(ctx)
+	log.Info("WebSocket Hub started.")
+
+	server := httpserver.NewServer(":"+port, hub, ctx)
 	if err := server.Start(":" + port); err != nil {
-		logger.Fatal("HTTP server failed", zap.Error(err))
+		log.Fatal("HTTP server failed", zap.Error(err))
 	}
 }

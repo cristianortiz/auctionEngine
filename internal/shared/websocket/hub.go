@@ -190,7 +190,7 @@ func (h *Hub) UnregisterClient(client *Client) {
 	}
 }
 
-// BroadcastMessageToLot envía un mensaje a todos los clientes suscritos a un lotID específico.
+// BroadcastMessageToLot sends a msg to all subscribed clients in a specific loID
 func (h *Hub) BroadcastMessageToLot(lotID string, data []byte) {
 	select { // Use select to avoid blocking if channel is full
 	case h.broadcast <- &Message{LotID: lotID, Data: data}:
@@ -201,8 +201,8 @@ func (h *Hub) BroadcastMessageToLot(lotID string, data []byte) {
 	}
 }
 
-// ReadPump lee mensajes del cliente WebSocket y los envía al Hub (a través del canal broadcast).
-// Este método debe ejecutarse en una goroutine por cada cliente.
+// ReadPump reads msgs from client and send it to the hub (through broadcast channel)
+// this method must be executed in a separated go routine for each client
 func (c *Client) ReadPump(ctx context.Context) {
 	defer func() {
 		c.Hub.UnregisterClient(c)
@@ -213,6 +213,8 @@ func (c *Client) ReadPump(ctx context.Context) {
 			zap.String("remote_addr", c.Conn.RemoteAddr().String()),
 		)
 	}()
+	// ping pong mechanisim to detect clients who disconnect abruptly, as closing web browser, network issues, if the client doesn't respond
+	// the ping with a pong inside pongWait, the server assumes a death connection and closes it
 	c.Conn.SetReadLimit(maxMessageSize)
 	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.Conn.SetPongHandler(func(string) error { c.Conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
@@ -228,7 +230,7 @@ func (c *Client) ReadPump(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			log.Info("ReadPump context cancelled for client",
-				zap.String("clientID", c.ID), // Use client.ID
+				zap.String("clientID", c.ID),
 				zap.String("lotID", c.LotID),
 			)
 			return // Exit the goroutine
@@ -240,14 +242,14 @@ func (c *Client) ReadPump(ctx context.Context) {
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
 				log.Error("WebSocket read error",
-					zap.String("clientID", c.ID), // Use client.ID
+					zap.String("clientID", c.ID),
 					zap.String("lotID", c.LotID),
 					zap.String("remote_addr", c.Conn.RemoteAddr().String()),
 					zap.Error(err),
 				)
 			} else {
 				log.Info("WebSocket connection closed by peer",
-					zap.String("clientID", c.ID), // Use client.ID
+					zap.String("clientID", c.ID),
 					zap.String("lotID", c.LotID),
 					zap.String("remote_addr", c.Conn.RemoteAddr().String()),
 					zap.Error(err), // Log the specific close error
@@ -258,7 +260,7 @@ func (c *Client) ReadPump(ctx context.Context) {
 		// message = bytes.TrimSpace(bytes.ReplaceAll(message, newline, space)) // Optional: trim whitespace
 
 		log.Debug("Received message from client",
-			zap.String("clientID", c.ID), // Use client.ID
+			zap.String("clientID", c.ID),
 			zap.String("lotID", c.LotID),
 			zap.ByteString("message", message),
 		)
@@ -268,14 +270,14 @@ func (c *Client) ReadPump(ctx context.Context) {
 		select {
 		case c.Hub.InboundMessages <- &ClientMessage{Client: c, Data: message}: // <-- Send message to InboundMessages
 			log.Debug("Message sent to Hub's InboundMessages channel",
-				zap.String("clientID", c.ID), // Use client.ID
+				zap.String("clientID", c.ID),
 				zap.String("lotID", c.LotID),
 			)
 		default:
 			// If the inbound channel is full, it means handlers are not keeping up.
 			// Log an error or implement backpressure/dropping logic.
 			log.Error("Hub InboundMessages channel is full, dropping message",
-				zap.String("clientID", c.ID), // Use client.ID
+				zap.String("clientID", c.ID),
 				zap.String("lotID", c.LotID),
 				zap.ByteString("message", message),
 			)
@@ -287,7 +289,7 @@ func (c *Client) ReadPump(ctx context.Context) {
 
 // / WritePump pumps messages from the hub to the websocket connection.
 // A goroutine running WritePump is started for each connection. The
-// application ensures that there is at most one writer to a connection by
+// application ensures that there is at least one writer to a connection by
 // invoking WriteControl and WriteMessage from a single goroutine.
 func (c *Client) WritePump(ctx context.Context) {
 	ticker := time.NewTicker(pingPeriod)
@@ -327,6 +329,9 @@ func (c *Client) WritePump(ctx context.Context) {
 			return // Exit the goroutine
 
 		case message, ok := <-c.Send:
+			// SetWriteDeadline ensures that if sending a message to a client takes too long (e.g., the client's network is very slow or blocked),
+			// the write operation does not block the WritePump goroutine indefinitely. If the write exceeds writeWait, it is considered
+			// an error and the connection is closed.
 			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				// The Hub closed the channel.

@@ -4,12 +4,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cristianortiz/auctionEngine/internal/shared/logger" // Importa el logger compartido
+	"github.com/cristianortiz/auctionEngine/internal/shared/logger"
 	"github.com/google/uuid"
-	"go.uber.org/zap" // Importa zap para usar sus campos estructurados
+	"go.uber.org/zap"
 )
 
-var log = logger.GetLogger() // Logger a nivel de paquete
+var log = logger.GetLogger()
 
 // AuctinLotState represents the actual state of a lot auction
 type AuctionLotState string

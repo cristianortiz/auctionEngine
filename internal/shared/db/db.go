@@ -7,7 +7,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
 
@@ -51,7 +51,7 @@ func GetPostgresDBPool(ctx context.Context) (*pgxpool.Pool, error) {
 		// config.HealthCheckPeriod = time.Minute
 
 		//connects using pool
-		pool, connectErr := pgxpool.ConnectConfig(ctx, config)
+		pool, connectErr := pgxpool.NewWithConfig(ctx, config)
 		if connectErr != nil {
 			err = fmt.Errorf("unable to connect to DB: %w", connectErr)
 			return

@@ -10,17 +10,19 @@ import (
 	"github.com/cristianortiz/auctionEngine/internal/shared/websocket"
 	"github.com/gofiber/fiber/v2"
 	fws "github.com/gofiber/websocket/v2" // Alias to avoid name conflicts
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
 type Server struct {
 	app *fiber.App
 	hub *websocket.Hub // wbs hub reference
+	ctx context.Context
 }
 
 var log = logger.GetLogger() // logger instance
 // NewServer creates a new server instance, receiving wbs hub
-func NewServer(addr string, hub *websocket.Hub) *Server {
+func NewServer(addr string, hub *websocket.Hub, ctx context.Context) *Server {
 	app := fiber.New()
 
 	// Middleware for logging
@@ -57,6 +59,9 @@ func NewServer(addr string, hub *websocket.Hub) *Server {
 			c.Close()
 			return
 		}
+
+		// temporal userId for testing purposes
+		userID := uuid.NewString()
 		log.Info("New WebSocket connection attempt", zap.String("lotID", lotID), zap.String("remote_addr", c.RemoteAddr().String()))
 
 		//creates a new client instance
@@ -65,13 +70,14 @@ func NewServer(addr string, hub *websocket.Hub) *Server {
 			Conn:  c,
 			Send:  make(chan []byte, 256),
 			LotID: lotID,
+			ID:    userID,
 		}
 
 		//register the client in the hub
 		hub.RegisterClient(client)
 		// starts the goroutines to write and red client messages
-		go client.WritePump()
-		client.ReadPump() //ReadPump blocks, its execute int handler goroutine
+		go client.WritePump(ctx)
+		client.ReadPump(ctx) //ReadPump blocks, its execute int handler goroutine
 		//ReadPump exits when connections closes or there ir an error
 		//defer function in ReadPump,takes care of unregister and close the connection
 
@@ -80,6 +86,7 @@ func NewServer(addr string, hub *websocket.Hub) *Server {
 	srv := &Server{
 		app: app,
 		hub: hub,
+		ctx: ctx,
 	}
 
 	return srv

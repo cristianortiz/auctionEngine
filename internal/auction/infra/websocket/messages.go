@@ -27,7 +27,7 @@ type BaseMessage struct {
 type ClientBidMessage struct {
 	BaseMessage
 	Payload struct {
-		LotID  uuid.UUID `json:"lost_id"`
+		LotID  uuid.UUID `json:"lot_id"`
 		UserID uuid.UUID `json:"user_id"`
 		Amount float64   `json:"amount"`
 	} `json:"payload"`
